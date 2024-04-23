@@ -15,8 +15,7 @@
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log"
-      ],
-      "predeploy": []
+      ]
     }
   ],
   "hosting": {
