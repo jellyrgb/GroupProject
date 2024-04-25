@@ -1,6 +1,9 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 node_modules
 =======
+=======
+>>>>>>> parent of bf14ee5 (11)
 # Logs
 logs
 *.log
@@ -67,4 +70,7 @@ node_modules/
 
 # dotenv environment variables file
 .env
+<<<<<<< HEAD
+>>>>>>> parent of bf14ee5 (11)
+=======
 >>>>>>> parent of bf14ee5 (11)
