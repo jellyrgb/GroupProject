@@ -16,7 +16,10 @@ module.exports = {
   parserOptions: {
     project: ["tsconfig.json", "tsconfig.dev.json"],
     sourceType: "module",
+<<<<<<< HEAD
     
+=======
+>>>>>>> parent of bf14ee5 (11)
   },
   ignorePatterns: [
     "/lib/**/*", // Ignore built files.
@@ -31,4 +34,7 @@ module.exports = {
     "indent": ["error", 2],
   },
 };
+<<<<<<< HEAD
 
+=======
+>>>>>>> parent of bf14ee5 (11)
