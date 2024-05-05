@@ -68,15 +68,10 @@ export default class TurretAttack extends NPCAction {
         }
 
         this.timer = new Timer(this.cooldown);
-        if (upgrade) {
-            this.atk *= 1.1;
-        }
     }
 
     public performAction(target: TargetableEntity): void {
-        //this.timer.isStopped() ? console.log("Turret attack cooling down!") : console.log("Turret attack ready!");
-
-        if (this.timer.isStopped() && this.actor.position.distanceTo(target.position) < 300) {
+        if (this.timer.isStopped() && this.actor.position.distanceTo(target.position) < 40) {
             this.actor.animation.play("ATTACKING", false);
 
             // Send a attacked event
@@ -103,14 +98,30 @@ export default class TurretAttack extends NPCAction {
 
     public handleInput(event: GameEvent): void {
         switch(event.type) {
-            default: {
+            case "TURRET_UPGRADED":
+                this.upgradeTurret();
+                break;
+            default:
                 super.handleInput(event);
                 break;
-            }
         }
     }
 
+    private upgradeTurret(): void {
+        this.atk *= 1.1;
+    }
+
     public update(deltaT: number): void {
+
+        if (!this._target || !this.actor) {
+            this.findNewTarget();
+            return;
+        }
+    
+        if (this.timer.isStopped() && this.actor.position.distanceTo(this._target.position) < 40) {
+            this.performAction(this._target);
+        }
+
         super.update(deltaT);
     }
 

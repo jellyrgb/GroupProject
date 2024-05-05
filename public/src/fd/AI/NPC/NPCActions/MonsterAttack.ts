@@ -14,11 +14,31 @@ import { BattlerEvent } from "../../../Events";
 export default class MonsterAttack extends NPCAction {
 
     protected timer: Timer;
+    protected damage: number;
+    protected cooldown: number;
     
-    public constructor(parent: NPCBehavior, actor: NPCActor) {
+    public constructor(parent: NPCBehavior, actor: NPCActor, level: number) {
         super(parent, actor);
         this._target = null;
-        this.timer = new Timer(2000);
+        this.cooldown = 2000;
+
+        if (level == 1) {
+            this.damage = 20;
+        } else if (level == 2) {
+            this.damage = 30;
+        } else if (level == 3) {
+            this.damage = 40;
+        } else if (level == 4) {
+            this.damage = 50;
+        } else if (level == 5) {
+            this.damage = 160;
+            this.cooldown = 8000;
+        } else if (level == 6) {
+            this.damage = 210;
+            this.cooldown = 8000;
+        }
+
+        this.timer = new Timer(this.cooldown);
     }
 
     public performAction(target: TargetableEntity): void {
@@ -31,7 +51,7 @@ export default class MonsterAttack extends NPCAction {
                 this.emitter.fireEvent(BattlerEvent.BATTLER_ATTACK, {
                     attacker: this.actor,
                     target: target,
-                    damage: 10
+                    damage: this.damage
                 });
             }
 

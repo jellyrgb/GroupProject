@@ -43,8 +43,6 @@ import Rect from "../../Wolfie2D/Nodes/Graphics/Rect";
 import TextInput from "../../Wolfie2D/Nodes/UIElements/TextInput";
 import TurretBehavior from "../AI/NPC/NPCBehavior/TurretBehavior";
 import BaseBehavior from "../AI/NPC/NPCBehavior/BaseBehavior";
-
-// Update here
 import Level1 from "../Scenes/Level1";
 import Level3 from "../Scenes/Level3";
 import Level4 from "../Scenes/Level4";
@@ -57,8 +55,15 @@ const BattlerGroups = {
     ENEMY: 2
 } as const;
 
-
 export default class Level2 extends Scene {
+
+    /** Level change variables */
+    private monsterType: string;
+    private monsterHealth: number;
+    private monsterMaxHealth: number;
+    private monsterSpeed: number;
+    private levelTileFile: string;
+    private levelMusicFile: string;
 
     /** GameSystems in the Scene */
     private inventoryHud: InventoryHUD;
@@ -68,14 +73,18 @@ export default class Level2 extends Scene {
     /** Healthbars for the battlers */
     private healthbars: Map<number, HealthbarHUD>;
 
+    /** Arrays for items */
     private seeds: Array<Seed>;
     private pearls: Array<Pearl>;
 
+    /** Attributes for shop */
     private shop: Shop;
-    private currency: number;
+    private money: number;
     private shopMenu: Layer;
     private price: Array<number>;
     private buyMenu: Layer;
+    private moneyLayer: Layer;
+    private goldUpgrade: number;
 
     // The wall layer of the tilemap
     private walls: OrthogonalTilemap;
@@ -83,29 +92,41 @@ export default class Level2 extends Scene {
     // The position graph for the navmesh
     private graph: PositionGraph;
     
-    // pause menu layer
+    /** Pause menu layers */
     private pauseMenu: Layer;
-
     private textInput: Layer;
 
+    /** Enemycount layer */
     private blueEnemyCount: number;
-
-    private turret: NPCActor;
-
     private enemyCount : Layer;
+    private enemyCountLabel: Label;
 
     private floors: OrthogonalTilemap;
 
+    /** Level time indicators */
     private timer : Layer;
-
     private night: boolean;
 
-    private baseId: number;
+    private levelCleared: boolean;
 
-    private enemyCountLabel: Label;
+    private baseId: number;
+    private turret: NPCActor;
+
+    /** Attributes for shop buying menu */
+    private option1priceId: number;
+    private option2priceId: number;
+    private option3priceId: number;
+    private option4priceId: number;
 
     public constructor(viewport: Viewport, sceneManager: SceneManager, renderingManager: RenderingManager, options: Record<string, any>) {
         super(viewport, sceneManager, renderingManager, options);
+
+        this.monsterHealth = 20;
+        this.monsterMaxHealth = 20;
+        this.monsterType = "monsterA";
+        this.monsterSpeed = 15;
+        this.levelTileFile = "fd_assets/tilemaps/level2.json";
+        this.levelMusicFile = "fd_assets/sounds/spring.mp3";
 
         this.battlers = new Array<Battler & Actor>();
         this.healthbars = new Map<number, HealthbarHUD>();
@@ -113,8 +134,11 @@ export default class Level2 extends Scene {
         this.seeds = new Array<Seed>();
         this.pearls = new Array<Pearl>();
 
-        this.currency = 30;
+        this.money = 30;
         this.price = [30, 20, 10, 10];
+        this.goldUpgrade = 0;
+
+        this.levelCleared = false;
     }
 
     /**
@@ -149,15 +173,15 @@ export default class Level2 extends Scene {
         this.load.image("monsterBLogo", "fd_assets/sprites/logoB.png")
 
         // Load the tilemap
-        this.load.tilemap("level1", "fd_assets/tilemaps/level1.json");
+        this.load.tilemap("level", this.levelTileFile);
 
         // Load the enemy locations
-        this.load.object("enemy_location", "fd_assets/data/enemies/enemy_location.json");
+        this.load.object("enemy_location", "fd_assets/data/enemies/level2_monster.json");
 
         // Load the seed locations
-        this.load.object("seeds", "fd_assets/data/items/seeds.json");
+        this.load.object("seeds", "fd_assets/data/items/level2_seed.json");
         this.load.object("shop", "fd_assets/data/items/shop.json");
-        this.load.object("pearls", "fd_assets/data/items/pearls.json");
+        this.load.object("pearls", "fd_assets/data/items/level2_pearl.json");
 
         // Load the image sprites
         this.load.image("seed", "fd_assets/sprites/seed.png");
@@ -168,8 +192,7 @@ export default class Level2 extends Scene {
         this.load.image("coin", "fd_assets/sprites/coin.png");
 
         // Load the sounds
-        // Update here
-        this.load.audio("background_music", "fd_assets/sounds/level2.mp3");
+        this.load.audio("background_music", this.levelMusicFile);
         this.load.audio("level_clear", "fd_assets/sounds/level_clear.mp3");
         this.load.audio("pause", "fd_assets/sounds/pause.mp3");
         this.load.audio("night_start", "fd_assets/sounds/night_start.mp3");
@@ -183,15 +206,19 @@ export default class Level2 extends Scene {
         this.load.audio("peach_attack", "fd_assets/sounds/peach.mp3");
         this.load.audio("watermelon_attack", "fd_assets/sounds/watermelon.mp3");
         this.load.audio("tomato_attack", "fd_assets/sounds/tomato.mp3");
+
+        this.load.audio("game_over", "fd_assets/sounds/game_over.mp3");
+        this.load.audio("shop_buy", "fd_assets/sounds/shop_buy.mp3");
+        this.load.audio("shop_entered", "fd_assets/sounds/shop_entered.mp3");
+        this.load.audio("pearl_pick_up", "fd_assets/sounds/pearl_pick_up.mp3");
     }
 
     /**
      * @see Scene.startScene
      */
     public override startScene() {
-        // Play background music
+        // Play level1 background music
         this.emitter.fireEvent("play_sound", {key: "background_music", loop: true, holdReference: true});
-        // Stop playing main menu bgm
         this.emitter.fireEvent("stop_sound", {key: "bgm"});
 
         const center = this.viewport.getCenter();
@@ -199,13 +226,158 @@ export default class Level2 extends Scene {
         this.night = false;
         let enemy = this.load.getObject("enemy_location");
         this.blueEnemyCount = enemy.enemies.length;
+
+        // Add in the tilemap
+        let tilemapLayers = this.add.tilemap("level");
+
+        // Get the wall layer
+        this.walls = <OrthogonalTilemap>tilemapLayers[1].getItems()[0];
+        this.floors = <OrthogonalTilemap>tilemapLayers[0].getItems()[0];
+
+        // Set the viewport bounds to the tilemap
+        let tilemapSize: Vec2 = this.walls.size;
+
+        this.viewport.setBounds(0, 0, tilemapSize.x, tilemapSize.y);
+        this.viewport.setZoomLevel(3);
+
+        this.initLayers();
+        this.initializePlayer();
+        this.initializeItems();
+        this.initializeNavmesh();
+        this.initializeNPCs();
+        this.initializeShopLayer();
+        this.initializePauseLayer();
+
+        // Make sure every characters are behind "leaves" layer
+        this.getLayer("primary").setDepth(0);
+        this.getLayer("leaves").setDepth(1);
+
+        // Add enemy count HUD
+        this.enemyCount = this.addUILayer("enemyCount");
+        this.enemyCount.setHidden(false);
+
+        const monsterPhoto = this.add.sprite("monsterBLogo", "enemyCount");
+        monsterPhoto.position.set(300, 10);
+
+        this.enemyCountLabel = <Label>this.add.uiElement(UIElementType.LABEL, "enemyCount", {
+            position: new Vec2(324, 10),
+            text: "x " + this.blueEnemyCount
+        });
+        this.enemyCountLabel.setTextColor(Color.WHITE);
+        this.enemyCountLabel.fontSize = 30;
+
+        // Add money HUD
+        this.moneyLayer = this.addUILayer("moneyLayer");
+        this.moneyLayer.setHidden(false);
+
+        const dollar = this.add.sprite("coin", "moneyLayer");
+        dollar.position.set(300, 28);
+
+        const dollarText = this.add.uiElement(UIElementType.LABEL, "moneyLayer", {
+            position: new Vec2(324, 28),
+            text: ""+ this.money
+        });
+        (dollarText as Label).setTextColor(Color.WHITE);
+        (dollarText as Label).fontSize = 30;
+
+        // Add level timer HUD
+        this.timer = this.addUILayer("timer");
+        this.timer.setHidden(false);
+
+        const moonPhoto = this.add.sprite("timer", "timer");
+        moonPhoto.position.set(155,10);
+
+        const timerLabel = this.add.uiElement(UIElementType.LABEL, "timer", { position: new Vec2(180, 10), text: "1:00" });
+        (timerLabel as Label).setTextColor(Color.WHITE);
+        (timerLabel as Label).fontSize = 30;
+    
+        let dayDuration = 60;
+        let interval = setInterval(() => {
+            let minutes = Math.floor(dayDuration / 60);
+            let seconds = dayDuration % 60;
+
+            // Pad the seconds with leading zeros
+            let secondsString = String(seconds).padStart(2, '0');
+
+            if (timerLabel) {
+                (timerLabel as Label).setText(`${minutes}:${secondsString}`);
+            }
         
+            if (dayDuration <= 0) {
+                clearInterval(interval);
+                if (timerLabel) {
+                    (timerLabel as Label).setText(" ");
+                    setTimeout(() => {
+                        if (timerLabel) {
+                            timerLabel.destroy();
+                            this.timer.setHidden(true);
+                        }
+                    }, 1000);
+                }
+                this.night = true;
+            }
+            dayDuration -= 1;
+        }, 1000)
+
+
+        // Subscribe to relevant events
+        this.receiver.subscribe("enemyDied");
+        this.receiver.subscribe(ItemEvent.ITEM_REQUEST);
+        this.receiver.subscribe(ItemEvent.ITEM_GROW_UP);
+        this.receiver.subscribe(ItemEvent.ITEM_PICKED_UP);
+        this.receiver.subscribe(ItemEvent.ITEM_DROPPED);
+        this.receiver.subscribe(ItemEvent.FINISH_GROW_UP);
+
+        // Add a UI for health
+        this.addUILayer("health");
+
+        this.receiver.subscribe(PlayerEvent.PLAYER_KILLED);
+        this.receiver.subscribe(PlayerEvent.SHOP_ENTERED);
+
+        this.receiver.subscribe(ShopEvent.OPTION_ONE_SELECTED);
+        this.receiver.subscribe(ShopEvent.OPTION_TWO_SELECTED);
+        this.receiver.subscribe(ShopEvent.OPTION_THREE_SELECTED);
+        this.receiver.subscribe(ShopEvent.OPTION_FOUR_SELECTED);
+
+        this.receiver.subscribe(ShopEvent.BOUGHT_ITEM);
+        this.receiver.subscribe(ShopEvent.BASE_UPGRADED);
+        this.receiver.subscribe(ShopEvent.GET_NEW_SEED);
+        this.receiver.subscribe(ShopEvent.GOLD_CHANCE_UPGRADE);
+
+        this.receiver.subscribe(BattlerEvent.BATTLER_KILLED);
+        this.receiver.subscribe(BattlerEvent.BATTLER_RESPAWN);
+        this.receiver.subscribe(BattlerEvent.BATTLER_ATTACK);
+        this.receiver.subscribe(CooldownEvent.COOLDOWN_MESSAGE);
+
+        // Text form events
+        this.receiver.subscribe("resumeGame");
+        this.receiver.subscribe("backToMainMenu");
+        this.receiver.subscribe("cheat");
+        this.receiver.subscribe("submitCheat");
+        this.receiver.subscribe("growFinish");
+        this.receiver.subscribe("exitShop");
+        this.receiver.subscribe("buy");
+        this.receiver.subscribe("sell");
+        this.receiver.subscribe("exitBuy");
+    }
+
+    /** Initializes the layers in the scene */
+    protected initLayers(): void {
+        this.addLayer("primary", 10);
+        this.addUILayer("items");
+        this.addUILayer("slots");
+        this.getLayer("slots").setDepth(2);
+        this.getLayer("items").setDepth(3);
+    }
+
+    /** Create the shop layer */
+    protected initializeShopLayer(): void {
         // Initialize the shop
         this.shopMenu = this.addUILayer("shop");
         this.shopMenu.setHidden(true);
 
         const shopLayer = this.getLayer("shop");
-        const centerShop = new Vec2(200, 200);
+        let centerShop = new Vec2(200, 200);
 
         const shopBackground = new Rect(new Vec2(centerShop.x - 25, centerShop.y - 25), new Vec2(200, 200));
         shopBackground.color = new Color(0, 0, 0, 0.9);
@@ -229,6 +401,7 @@ export default class Level2 extends Scene {
         // Buy menu initialize
         this.buyMenu = this.addUILayer("buy");
         this.buyMenu.setHidden(true);
+        centerShop = new Vec2(195, 200);
 
         const buyLayer = this.getLayer("buy");
         const buyBackground = new Rect(new Vec2(centerShop.x - 25, centerShop.y - 25), new Vec2(320, 250));
@@ -236,13 +409,6 @@ export default class Level2 extends Scene {
         buyBackground.borderColor = new Color(255, 255, 255);
         buyBackground.borderWidth = 2;
         buyLayer.addNode(buyBackground);
-
-        // Indicate current this.dollar
-        const dollar = this.add.sprite("coin", "buy");
-        dollar.position.set(centerShop.x + 110, centerShop.y - 135);
-        const dollarText = this.add.uiElement(UIElementType.LABEL, "buy", {position: new Vec2(centerShop.x + 90, centerShop.y - 134), text: ""+ this.currency});
-        (dollarText as Label).setTextColor(Color.WHITE);
-        (dollarText as Label).fontSize = 22;
 
         const left = centerShop.x - 100;
         const right = centerShop.x + 50;
@@ -276,6 +442,7 @@ export default class Level2 extends Scene {
         (option1TextLine2 as Label).setTextColor(Color.WHITE);
         (option1TextLine2 as Label).fontSize = 28;
         const option1TextLine3 = this.add.uiElement(UIElementType.LABEL, "buy", {position: new Vec2(left, centerShop.y - 80), text: "Cost: " + this.price[0] + " coins"});
+        this.option1priceId = option1TextLine3.id;
         (option1TextLine3 as Label).setTextColor(Color.WHITE);
         (option1TextLine3 as Label).fontSize = 28;
 
@@ -283,10 +450,11 @@ export default class Level2 extends Scene {
         const option2Text = this.add.uiElement(UIElementType.LABEL, "buy", {position: new Vec2(right, centerShop.y - 110), text: "Upgrade chance"});
         (option2Text as Label).setTextColor(Color.WHITE);
         (option2Text as Label).fontSize = 28;
-        const option2TextLine2 = this.add.uiElement(UIElementType.LABEL, "buy", {position: new Vec2(right, centerShop.y - 95), text: "Next level: Gold +5%"});
+        const option2TextLine2 = this.add.uiElement(UIElementType.LABEL, "buy", {position: new Vec2(right, centerShop.y - 95), text: "Next level: Upper +0.5"});
         (option2TextLine2 as Label).setTextColor(Color.WHITE);
         (option2TextLine2 as Label).fontSize = 28;
         const option2TextLine3 = this.add.uiElement(UIElementType.LABEL, "buy", {position: new Vec2(right, centerShop.y - 80), text: "Cost: " + this.price[1] + " coins"});
+        this.option2priceId = option2TextLine3.id;
         (option2TextLine3 as Label).setTextColor(Color.WHITE);
         (option2TextLine3 as Label).fontSize = 28;
 
@@ -294,10 +462,11 @@ export default class Level2 extends Scene {
         const option3Text = this.add.uiElement(UIElementType.LABEL, "buy", {position: new Vec2(left, centerShop.y - 10), text: "Base Upgrade"});
         (option3Text as Label).setTextColor(Color.WHITE);
         (option3Text as Label).fontSize = 28;
-        const option3TextLine2 = this.add.uiElement(UIElementType.LABEL, "buy", {position: new Vec2(left, centerShop.y + 5), text: "Next level: def +10%"});
+        const option3TextLine2 = this.add.uiElement(UIElementType.LABEL, "buy", {position: new Vec2(left, centerShop.y + 5), text: "Next level: HP/Max HP +20"});
         (option3TextLine2 as Label).setTextColor(Color.WHITE);
         (option3TextLine2 as Label).fontSize = 28;
         const option3TextLine3 = this.add.uiElement(UIElementType.LABEL, "buy", {position: new Vec2(left, centerShop.y + 20), text: "Cost: " + this.price[2] + " coins"});
+        this.option3priceId = option3TextLine3.id;
         (option3TextLine3 as Label).setTextColor(Color.WHITE);
         (option3TextLine3 as Label).fontSize = 28;
 
@@ -309,6 +478,7 @@ export default class Level2 extends Scene {
         (option4TextLine2 as Label).setTextColor(Color.WHITE);
         (option4TextLine2 as Label).fontSize = 28;
         const option4TextLine3 = this.add.uiElement(UIElementType.LABEL, "buy", {position: new Vec2(right, centerShop.y + 20), text: "Cost: " + this.price[3] + " coins"});
+        this.option4priceId = option4TextLine3.id;
         (option4TextLine3 as Label).setTextColor(Color.WHITE);
         (option4TextLine3 as Label).fontSize = 28;
 
@@ -319,9 +489,10 @@ export default class Level2 extends Scene {
         option4.onClickEventId = ShopEvent.OPTION_FOUR_SELECTED;
 
         exit.onClickEventId = "exitBuy";
+    }
 
-
-        // pause menu initialize
+    /** Create the pause menu layer */
+    protected initializePauseLayer(): void {
         this.pauseMenu = this.addUILayer("pauseMenu");
         this.pauseMenu.setHidden(true);
     
@@ -366,122 +537,6 @@ export default class Level2 extends Scene {
         submitButton.onClickEventId = "submitCheat";
         submitButton.backgroundColor = Color.TRANSPARENT;
         submitButton.size.set(90, 40);
-
-        this.receiver.subscribe("resumeGame");
-        this.receiver.subscribe("backToMainMenu");
-        this.receiver.subscribe("cheat");
-        this.receiver.subscribe("submitCheat");
-        this.receiver.subscribe("growFinish");
-        this.receiver.subscribe("exitShop");
-        this.receiver.subscribe("buy");
-        this.receiver.subscribe("sell");
-        this.receiver.subscribe("exitBuy");
-        this.receiver.subscribe("exitSell");
-
-
-        // Add in the tilemap
-        let tilemapLayers = this.add.tilemap("level1");
-
-        // Get the wall layer
-        this.walls = <OrthogonalTilemap>tilemapLayers[1].getItems()[0];
-        this.floors = <OrthogonalTilemap>tilemapLayers[0].getItems()[0];
-
-        // Set the viewport bounds to the tilemap
-        let tilemapSize: Vec2 = this.walls.size;
-
-        this.viewport.setBounds(0, 0, tilemapSize.x, tilemapSize.y);
-        this.viewport.setZoomLevel(3);
-
-        this.initLayers();
-        
-        // Create the player
-        this.initializePlayer();
-        
-        this.initializeItems();
-
-        this.initializeNavmesh();
-
-        // Create the NPCS
-        this.initializeNPCs();
-
-        // Make sure every characters are behind "leaves" layer
-        this.getLayer("primary").setDepth(0);
-        this.getLayer("leaves").setDepth(1);
-
-        this.enemyCount = this.addUILayer("enemyCount");
-        this.enemyCount.setHidden(false);
-
-        const monsterPhoto = this.add.sprite("monsterBLogo", "enemyCount");
-        monsterPhoto.position.set(300, 10);
-
-        this.enemyCountLabel = <Label>this.add.uiElement(UIElementType.LABEL, "enemyCount", {
-            position: new Vec2(324, 10),
-            text: "x " + this.blueEnemyCount
-        });
-        this.enemyCountLabel.setTextColor(Color.WHITE);
-        this.enemyCountLabel.fontSize = 24;
-
-        this.timer = this.addUILayer("timer");
-        this.timer.setHidden(false);
-
-        const moonPhoto = this.add.sprite("timer", "timer");
-        moonPhoto.position.set(155,10);
-
-        const timerLabel = this.add.uiElement(UIElementType.LABEL, "timer", { position: new Vec2(180, 10), text: "1:00" });
-        (timerLabel as Label).setTextColor(Color.WHITE);
-        (timerLabel as Label).fontSize = 24;
-    
-        let dayDuration = 60;
-        let interval = setInterval(() => {
-            let minutes = Math.floor(dayDuration / 60);
-            let seconds = dayDuration % 60;
-
-            // Pad the seconds with leading zeros
-            let secondsString = String(seconds).padStart(2, '0');
-
-            if (timerLabel) {
-                (timerLabel as Label).setText(`${minutes}:${secondsString}`);
-            }
-        
-            if (dayDuration <= 0) {
-                clearInterval(interval);
-                if (timerLabel) {
-                    (timerLabel as Label).setText(" ");
-                    setTimeout(() => {
-                        if (timerLabel) {
-                            timerLabel.destroy();
-                            this.timer.setHidden(true);
-                        }
-                    }, 1000);
-                }
-                this.night = true;
-            }
-            dayDuration -= 1;
-        }, 1000)
-
-
-        // Subscribe to relevant events
-        this.receiver.subscribe("enemyDied");
-        this.receiver.subscribe(ItemEvent.ITEM_REQUEST);
-        this.receiver.subscribe(ItemEvent.ITEM_GROW_UP);
-        this.receiver.subscribe(ItemEvent.ITEM_PICKED_UP);
-        this.receiver.subscribe(ItemEvent.ITEM_DROPPED);
-        this.receiver.subscribe(ItemEvent.FINISH_GROW_UP);
-
-        // Add a UI for health
-        this.addUILayer("health");
-
-        this.receiver.subscribe(PlayerEvent.PLAYER_KILLED);
-        this.receiver.subscribe(PlayerEvent.SHOP_ENTERED);
-        this.receiver.subscribe(ShopEvent.OPTION_ONE_SELECTED);
-        this.receiver.subscribe(ShopEvent.OPTION_TWO_SELECTED);
-        this.receiver.subscribe(ShopEvent.OPTION_THREE_SELECTED);
-        this.receiver.subscribe(ShopEvent.OPTION_FOUR_SELECTED);
-
-        this.receiver.subscribe(BattlerEvent.BATTLER_KILLED);
-        this.receiver.subscribe(BattlerEvent.BATTLER_RESPAWN);
-        this.receiver.subscribe(BattlerEvent.BATTLER_ATTACK);
-        this.receiver.subscribe(CooldownEvent.COOLDOWN_MESSAGE);
     }
 
     /**
@@ -492,12 +547,13 @@ export default class Level2 extends Scene {
             this.handleEvent(this.receiver.getNextEvent());
         }
 
-        // If the player collides with the shop, emit an event
+        // If the player touches the shop, emit shop open event
         let player1 = this.battlers.find(b => b instanceof PlayerActor) as PlayerActor;
         if (player1 && player1.position.distanceTo(this.shop.position) < 20) {
             this.emitter.fireEvent(PlayerEvent.SHOP_ENTERED, {});
         }
 
+        // Collision detector
         for (let i = 0; i < this.battlers.length; i++) {
             for (let j = i + 1; j < this.battlers.length; j++) {
                 if (this.battlers[i].id === this.baseId || this.battlers[j].id === this.baseId) {
@@ -532,7 +588,7 @@ export default class Level2 extends Scene {
         this.inventoryHud.update(deltaT);
         this.healthbars.forEach(healthbar => healthbar.update(deltaT));
 
-        
+        // If the level has ended
         if (this.blueEnemyCount === 0 && this.night) {
             // Play level clear sound
             // Reduce the sound volume
@@ -549,24 +605,28 @@ export default class Level2 extends Scene {
 
             // Proceed to the next level after 3 seconds
             setTimeout(() => {
-                MainMenu.maxLevelUnlocked = Math.max(MainMenu.maxLevelUnlocked, 2);
-                this.viewport.setZoomLevel(1);
-                this.sceneManager.changeToScene(MainMenu);
-                // this.sceneManager.changeToScene(Level2);
+                this.levelCleared = true;
             }, 3000);
         }
 
-        let player = this.battlers.find(b => b instanceof PlayerActor) as PlayerActor;
-        if (Input.isKeyJustPressed("y")){
-            console.log("Player Pos:", player.position.x , player.position.y);
+        if (this.levelCleared) {
+            this.emitter.fireEvent("stop_sound", {key:  "background_music"});
+
+            MainMenu.maxLevelUnlocked = Math.max(MainMenu.maxLevelUnlocked, 3);
+            this.viewport.setZoomLevel(1);
+            this.sceneManager.changeToScene(Level3);
         }
     }
-    private updateEnemyCountLabel() {
+
+    /** Update enemy count HUD */
+    protected updateEnemyCountLabel() {
         if (this.enemyCountLabel) {
             this.enemyCountLabel.setText("x " + this.blueEnemyCount);
         }
     }
-    private preventEscape(): void {
+
+    /** Prevent the player from escaping the scene */
+    protected preventEscape(): void {
         // Prevent player escape from map
         let player = this.battlers.find(b => b instanceof PlayerActor) as PlayerActor;
         let currentPosition = player.position.clone();
@@ -596,6 +656,7 @@ export default class Level2 extends Scene {
         }
     }
 
+    /** Resolve collision when detected */
     private resolveCollision(a: Battler & Actor, b: Battler & Actor): void {
         // Since a and b are colliding, we need to move them apart
         let direction = a.position.dirTo(b.position);
@@ -608,7 +669,7 @@ export default class Level2 extends Scene {
         return a.position.distanceTo(b.position) < 20;
     }
 
-    private togglePauseMenu(): void {
+    protected togglePauseMenu(): void {
         const pauseMenuLayer = this.getLayer("pauseMenu");
         const isHidden = pauseMenuLayer.isHidden();
 
@@ -621,17 +682,26 @@ export default class Level2 extends Scene {
         }
     }
 
+    protected handleShopEntered(event: GameEvent): void {
+        // If the shop UI Layer is already open, do nothing
+        if (this.getLayer("shop").isHidden() === false) {
+            return;
+        }
+
+        // Open the shop UI Layer
+        this.toggleShopMenu();
+    }
+
     private toggleShopMenu(): void {
         const requestedLayer = this.getLayer("shop");
         const isHidden = requestedLayer.isHidden();
 
         if (!isHidden) {
             requestedLayer.setHidden(true);
-            console.log("Shop is now hidden")
         } 
         else {
             requestedLayer.setHidden(false);
-            console.log("Shop is now not hidden")
+            this.emitter.fireEvent("play_sound", {key: "shop_entered", loop: false, holdReference: false});
         }
     }
 
@@ -647,17 +717,27 @@ export default class Level2 extends Scene {
         }
     }
 
-    private handleSell(event: GameEvent): void {
+    /** Handle item sell event */
+    protected handleSell(event: GameEvent): void {
         // If the player has a pearl, sell it for 10 coins
         let player = this.battlers.find(b => b instanceof PlayerActor) as PlayerActor;
         let inventory = player.inventory;
         let pearl = inventory.find(item => item instanceof Pearl);
         if (pearl) {
-            this.currency += 10;
             inventory.remove(pearl.id);
-            // this.emitter.fireEvent("play_sound", {key: "sell", loop: false, holdReference: false});
+            pearl.getSprite().destroy();
+            // Add 30~60 coins to the player's money
+            this.money += Math.floor(Math.random() * 30) + 30;
+
+            // Update the currency label
+            const dollarText = this.getLayer("moneyLayer").getItems().find(node => node instanceof Label) as Label;
+            if (dollarText) {
+                dollarText.text = "" + this.money;
+            }
+
+            this.emitter.fireEvent("play_sound", {key: "shop_buy", loop: false, holdReference: false});
         }
-        
+
     }
 
     private CheatInput(): void {
@@ -676,35 +756,47 @@ export default class Level2 extends Scene {
         }
     }
     
+    /**
+     * Handle entered cheat code
+     * @param cheatCode the cheat code to handle
+     */
     public handleCheatSubmission(cheatCode: string): void {
         let player = this.battlers.find(b => b instanceof PlayerActor) as PlayerActor;
-        console.log("Cheat code handling: ", cheatCode);
-        // Update here
-        if(cheatCode == "1"){
+        if (cheatCode == "1") {
             this.sceneManager.changeToScene(Level1);
         }
-        if(cheatCode == "3"){
+        if (cheatCode == "2") {
+            this.sceneManager.changeToScene(Level2);
+        }
+        if (cheatCode == "3") {
             this.sceneManager.changeToScene(Level3);
         }
-        if(cheatCode == "4"){
+        if (cheatCode == "4") {
             this.sceneManager.changeToScene(Level4);
         }
-        if(cheatCode == "5"){
+        if (cheatCode == "5") {
             this.sceneManager.changeToScene(Level5);
         }
-        if(cheatCode == "6") {
+        if (cheatCode == "6") {
             this.sceneManager.changeToScene(Level6);
         }
-        if(cheatCode == "UNLOCK"){
+
+        if (cheatCode == "UNLOCK") {
             MainMenu.maxLevelUnlocked = Math.max(MainMenu.maxLevelUnlocked, 6);
         }
-        if(cheatCode == "INVISIBLE"){
+        if (cheatCode == "INVISIBLE") {
             player.visible = false;
         }
-        if(cheatCode == "VISIBLE"){
+        if (cheatCode == "VISIBLE") {
             player.visible = true;
         }
-
+        if (cheatCode == "MONEY") {
+            this.money += 10000;
+            const dollarText = this.getLayer("moneyLayer").getItems().find(node => node instanceof Label) as Label;
+            if (dollarText) {
+                dollarText.text = "" + this.money;
+            }
+        }
     }
 
     /**
@@ -769,29 +861,149 @@ export default class Level2 extends Scene {
                 this.handleSell(event);
                 break;
             }
-            case ShopEvent.OPTION_ONE_SELECTED: {
-                console.log("Option 1 selected");
-                if (this.currency >= this.price[0]) {
-                    this.currency -= this.price[0];
-                    this.price[0] += 10;
-                    // this.emitter.fireEvent("play_sound", {key: "purchase", loop: false, holdReference: false});
-                    this.emitter.fireEvent(ShopEvent.TURRET_UPGRADED, {});
+            case ShopEvent.BOUGHT_ITEM: {
+                let price = event.data.get("price");
+                this.money -= price;
+
+                // Update the currency label
+                const dollarText = this.getLayer("moneyLayer").getItems().find(node => node instanceof Label) as Label;
+                if (dollarText) {
+                    dollarText.text = "" + this.money;
                 }
                 break;
             }
+            case ShopEvent.OPTION_ONE_SELECTED: {
+
+                if (this.money >= this.price[0]) {
+                    this.emitter.fireEvent("play_sound", {key: "shop_buy", loop: false, holdReference: false});
+                    this.emitter.fireEvent(ShopEvent.TURRET_UPGRADED, {});
+                    this.emitter.fireEvent(ShopEvent.BOUGHT_ITEM, {price: this.price[0]});
+                    this.price[0] += 10;
+
+                    // Remove the existing price label
+                    const oldPriceLabel = this.getLayer("buy").getItems().find(node => node.id === this.option1priceId) as Label;
+                    if (oldPriceLabel) {
+                        oldPriceLabel.destroy();
+                    }
+
+                    // Change the price of the next upgrade and display it
+                    const newPriceLabel = this.add.uiElement(UIElementType.LABEL, "buy", {
+                        position: new Vec2(95, 120), 
+                        text: "Cost: " + this.price[0] + " coins"
+                    });
+                    (newPriceLabel as Label).setTextColor(Color.WHITE);
+                    (newPriceLabel as Label).fontSize = 28;
+
+                    this.option1priceId = newPriceLabel.id;
+                }
+
+                break;
+            }
             case ShopEvent.OPTION_TWO_SELECTED: {
-                console.log("Option 2 selected");
+
+                if (this.money >= this.price[1]) {
+                    this.emitter.fireEvent("play_sound", {key: "shop_buy", loop: false, holdReference: false});
+
+                    this.emitter.fireEvent(ShopEvent.GOLD_CHANCE_UPGRADE, {});
+                    this.emitter.fireEvent(ShopEvent.BOUGHT_ITEM, {price: this.price[1]});
+                    this.price[1] += 10;
+
+                    // Remove the existing price label
+                    const oldPriceLabel = this.getLayer("buy").getItems().find(node => node.id === this.option2priceId) as Label;
+                    if (oldPriceLabel) {
+                        oldPriceLabel.destroy();
+                    }
+
+                    // Change the price of the next upgrade and display it
+                    const newPriceLabel = this.add.uiElement(UIElementType.LABEL, "buy", {
+                        position: new Vec2(245, 120), 
+                        text: "Cost: " + this.price[1] + " coins"
+                    });
+                    (newPriceLabel as Label).setTextColor(Color.WHITE);
+                    (newPriceLabel as Label).fontSize = 28;
+                    
+                    this.option2priceId = newPriceLabel.id;
+                }
+
                 break;
             }
             case ShopEvent.OPTION_THREE_SELECTED: {
-                console.log("Option 3 selected");
+
+                if (this.money >= this.price[2]) {
+                    this.emitter.fireEvent("play_sound", {key: "shop_buy", loop: false, holdReference: false});
+
+                    this.emitter.fireEvent(ShopEvent.BASE_UPGRADED, {});
+                    this.emitter.fireEvent(ShopEvent.BOUGHT_ITEM, {price: this.price[2]});
+                    this.price[2] += 10;
+                    
+                    // Remove the existing price label
+                    const oldPriceLabel = this.getLayer("buy").getItems().find(node => node.id === this.option3priceId) as Label;
+                    if (oldPriceLabel) {
+                        oldPriceLabel.destroy();
+                    }
+
+                    // Change the price of the next upgrade and display it
+                    const newPriceLabel = this.add.uiElement(UIElementType.LABEL, "buy", {
+                        position: new Vec2(95, 220),
+                        text: "Cost: " + this.price[2] + " coins"
+                    });
+                    (newPriceLabel as Label).setTextColor(Color.WHITE);
+                    (newPriceLabel as Label).fontSize = 28;
+                    
+                    this.option3priceId = newPriceLabel.id;
+                }
+
                 break;
             }
             case ShopEvent.OPTION_FOUR_SELECTED: {
-                console.log("Option 4 selected");
+
+                if (this.money >= this.price[3]) {
+                    this.emitter.fireEvent("play_sound", {key: "shop_buy", loop: false, holdReference: false});
+
+                    this.emitter.fireEvent(ShopEvent.GET_NEW_SEED, {});
+                    this.emitter.fireEvent(ShopEvent.BOUGHT_ITEM, {price: this.price[3]});
+                    this.price[3] += 10;
+
+                    // Remove the existing price label
+                    const oldPriceLabel = this.getLayer("buy").getItems().find(node => node.id === this.option4priceId) as Label;
+                    if (oldPriceLabel) {
+                        oldPriceLabel.destroy();
+                    }
+
+                    // Change the price of the next upgrade and display it
+                    const newPriceLabel = this.add.uiElement(UIElementType.LABEL, "buy", {
+                        position: new Vec2(245, 220),
+                        text: "Cost: " + this.price[3] + " coins"
+                    });
+                    (newPriceLabel as Label).setTextColor(Color.WHITE);
+                    (newPriceLabel as Label).fontSize = 28;
+                    
+                    this.option4priceId = newPriceLabel.id;
+                }
+
                 break;
             }
-            
+
+            // Shop buy events
+            case ShopEvent.BASE_UPGRADED: {
+                // Heal base npc's health by 20
+                let base = this.battlers.find(b => b.id === this.baseId) as NPCActor;
+                base.health += 20;
+                base.maxHealth += 20;
+                
+                break;
+            }
+            case ShopEvent.GET_NEW_SEED: {
+                // Add a new seed to the ground in front of the base NPC
+                let sprite = this.add.sprite("seed", "primary");
+                this.seeds.push(new Seed(sprite, 2));
+                this.seeds[this.seeds.length - 1].position.set(264, 200);
+                break;
+            }
+            case ShopEvent.GOLD_CHANCE_UPGRADE: {
+                this.goldUpgrade += 0.5;
+                break;
+            }
 
             // Battle Events
             case BattlerEvent.BATTLER_KILLED: {
@@ -806,7 +1018,7 @@ export default class Level2 extends Scene {
                 break;
             }
 
-
+            // Cooldown event
             case CooldownEvent.COOLDOWN_MESSAGE: {
                 const remainingTime = event.data.get("remainingTime");  // 값을 가져올 때 get 메서드 사용
                 this.showCooldownMessage(remainingTime);
@@ -840,6 +1052,10 @@ export default class Level2 extends Scene {
         }
     }
 
+    /**
+     * Sound effect for battler attacks
+     * @param event battler attack event
+     */
     protected handleBattlerAttack(event: GameEvent): void {
         let attacker = event.data.get("attacker");
 
@@ -871,13 +1087,21 @@ export default class Level2 extends Scene {
 
         if (pearls.length > 0) {
             inventory.add(pearls.reduce(ClosestPositioned(node)));
+            // Play item pick up sound
+            this.emitter.fireEvent("play_sound", {key: "pearl_pick_up", loop: false, holdReference: false});
         }
 
         if (items.length > 0) {
             inventory.add(items.reduce(ClosestPositioned(node)));
+            // Play item pick up sound
+            this.emitter.fireEvent("play_sound", {key: "pick_up", loop: false, holdReference: false});
         }
     }
 
+    /**
+     * Handle the seed growing up event
+     * @param event 
+     */
     protected handleItemGrowUp(event: GameEvent): void {
         let item = event.data.get("item");
         
@@ -886,57 +1110,60 @@ export default class Level2 extends Scene {
         let itemType = "";
         let itemStar = "";
 
-        if (item.st === 1) {
+        // Increase the star if gold upgrade is bought
+        item.st += this.goldUpgrade;
+
+        if (item.st <= 1) {
             name = "turretA";
             health = 100;
             itemType = "tomato";
             itemStar = "normal";
-        } else if (item.st === 2) {
+        } else if (item.st <= 2) {
             name = "turretAS";
             health = 100;
             itemType = "tomato";
             itemStar = "silver";
-        } else if (item.st === 2) {
+        } else if (item.st <= 3) {
             name = "turretAG";
             health = 100;
             itemType = "tomato";
             itemStar = "gold";
-        } else if (item.st === 4) {
+        } else if (item.st <= 4) {
             name = "turretB";
             health = 150;
             itemType = "watermelon";
             itemStar = "normal";
-        } else if (item.st === 5) {
+        } else if (item.st <= 5) {
             name = "turretBS";
             health = 150;
             itemType = "watermelon";
             itemStar = "silver";
-        } else if (item.st === 6) {
+        } else if (item.st <= 6) {
             name = "turretBG";
             health = 150;
             itemType = "watermelon";
             itemStar = "gold";
-        } else if (item.st === 7) {
+        } else if (item.st <= 7) {
             name = "turretC";
             health = 200;
             itemType = "peach";
             itemStar = "normal";
-        } else if (item.st === 8) {
+        } else if (item.st <= 8) {
             name = "turretCS";
             health = 200;
             itemType = "peach";
             itemStar = "silver";
-        } else if (item.st === 9) {
+        } else if (item.st <= 9) {
             name = "turretCG";
             health = 200;
             itemType = "peach";
             itemStar = "gold";
-        } else if (item.st === 10) {
+        } else if (item.st <= 10) {
             name = "turretD";
             health = 250;
             itemType = "lemon";
             itemStar = "normal";
-        } else if (item.st === 11) {
+        } else if (item.st <= 11) {
             name = "turretDS";
             health = 250;
             itemType = "lemon";
@@ -974,16 +1201,6 @@ export default class Level2 extends Scene {
             this.battlers.push(turret);
             this.turret = turret;
         }, 4000);
-    }
-
-    protected handleShopEntered(event: GameEvent): void {
-        // If the shop UI Layer is already open, do nothing
-        if (this.getLayer("shop").isHidden() === false) {
-            return;
-        }
-
-        // Open the shop UI Layer
-        this.toggleShopMenu();
     }
 
     protected handleItemPickedUp(event: GameEvent): void {
@@ -1057,6 +1274,9 @@ export default class Level2 extends Scene {
         
     }
 
+    /**
+     * Print the message when the turrets installs are too close
+     */
     protected closeMessage(): void {
         const uiLayer = this.getLayer("enemyCount");
 
@@ -1077,6 +1297,10 @@ export default class Level2 extends Scene {
         }, 1000);
     }
 
+    /**
+     * Print the message when the player tries to plant another seed before the cooldown ends
+     * @param remainingTime the remaining time for the cooldown
+     */
     protected showCooldownMessage(remainingTime: string): void {
         const uiLayer = this.getLayer("enemyCount");
 
@@ -1123,15 +1347,6 @@ export default class Level2 extends Scene {
         
     }
 
-    /** Initializes the layers in the scene */
-    protected initLayers(): void {
-        this.addLayer("primary", 10);
-        this.addUILayer("items");
-        this.addUILayer("slots");
-        this.getLayer("slots").setDepth(2);
-        this.getLayer("items").setDepth(3);
-    }
-
     /**
      * Initializes the player in the scene
      */
@@ -1145,8 +1360,6 @@ export default class Level2 extends Scene {
         player.maxHealth = 10;
 
         player.inventory.onChange = ItemEvent.INVENTORY_CHANGED
-        // console.log(this.getLayer("slots").getDepth());
-        // console.log(this.getLayer("items").getDepth());
         this.inventoryHud = new InventoryHUD(this, player.inventory, "inventorySlot", {
             start: new Vec2(232, 998),
             slotLayer: "slots",
@@ -1171,6 +1384,7 @@ export default class Level2 extends Scene {
         this.battlers.push(player);
         this.viewport.follow(player);
     }
+
     /**
      * Initialize the NPCs 
      */
@@ -1181,7 +1395,10 @@ export default class Level2 extends Scene {
         baseNPC.addPhysics(new AABB(Vec2.ZERO, new Vec2(7, 7)), null, false);
 
         // Give the NPCS their healthbars
-        let healthbar = new HealthbarHUD(this, baseNPC, "primary", {size: baseNPC.size.clone().scaled(4, 1/2), offset: baseNPC.size.clone().scaled(0, -1/2)});
+        let healthbar = new HealthbarHUD(this, baseNPC, "primary", {
+            size: baseNPC.size.clone().scaled(4, 1/2), 
+            offset: baseNPC.size.clone().scaled(0, -1/2)
+        });
         this.healthbars.set(baseNPC.id, healthbar);
 
         this.baseId = baseNPC.id;
@@ -1219,11 +1436,14 @@ export default class Level2 extends Scene {
         }, waveTime);
     }
 
+    /**
+     * Initialize the monsters in the scene
+     */
     protected initializeMonsters(): void {
         let enemy = this.load.getObject("enemy_location");
 
         for (let i = 0; i < enemy.enemies.length; i++) {
-            let npc = this.add.animatedSprite(NPCActor, "monsterA", "primary");
+            let npc = this.add.animatedSprite(NPCActor, this.monsterType, "primary");
             npc.position.set(enemy.enemies[i][0], enemy.enemies[i][1]);
             npc.addPhysics(new AABB(Vec2.ZERO, new Vec2(7, 7)), null, false);
 
@@ -1233,13 +1453,13 @@ export default class Level2 extends Scene {
 
             npc.type = "monster";
             npc.battleGroup = 2;
-            npc.speed = 10;
-            npc.health = 150;
-            npc.maxHealth = 150;
+            npc.speed = this.monsterSpeed;
+            npc.health = this.monsterHealth;
+            npc.maxHealth = this.monsterMaxHealth;
             npc.navkey = "navmesh";
 
             // Give the NPCs their AI
-            npc.addAI(EnemyBehavior, {target: this.battlers[0], range: 800});
+            npc.addAI(EnemyBehavior, {target: this.battlers[0], range: 800, level: 2});
 
             // Play the NPCs "IDLE" animation 
             npc.animation.play("IDLE");
@@ -1249,22 +1469,25 @@ export default class Level2 extends Scene {
     }
 
     /**
-     * Initialize the items in the scene (healthpacks and laser guns)
+     * Initialize the items in the scene
      */
     protected initializeItems(): void {
+        // Seeds
         let seeds = this.load.getObject("seeds");
         this.seeds = new Array<Seed>(seeds.items.length);
         for (let i = 0; i < seeds.items.length; i++) {
             let sprite = this.add.sprite("seed", "primary");
-            this.seeds[i] = new Seed(sprite);
+            this.seeds[i] = new Seed(sprite, 2);
             this.seeds[i].position.set(seeds.items[i][0], seeds.items[i][1]);
         }
 
+        // Shop
         let shop = this.load.getObject("shop");
         let shopSprite = this.add.sprite("shop", "primary");
-        this.shop = new Shop(shopSprite, this.currency);
+        this.shop = new Shop(shopSprite, this.money);
         this.shop.position.set(shop.location[0][0], shop.location[0][1]);
 
+        // Pearls
         let pearls = this.load.getObject("pearls");
         this.pearls = new Array<Pearl>(pearls.items.length);
         for (let i = 0; i < pearls.items.length; i++) {
