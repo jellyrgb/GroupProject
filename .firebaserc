@@ -7,5 +7,6 @@
     "farm-defense-380": {
       "extensionInstances": {}
     }
-  }
+  },
+  "dataconnectEmulatorConfig": {}
 }
